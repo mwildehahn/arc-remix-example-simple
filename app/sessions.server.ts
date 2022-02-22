@@ -1,19 +1,83 @@
+import type { Session } from "remix";
 // importing createArcTableSessionStorage doesn't work, even though the docs say it should
-import { createCookie /* createArcTableSessionStorage */ } from "remix";
+import { redirect /* createArcTableSessionStorage */ } from "remix";
 import { createArcTableSessionStorage } from "@remix-run/architect";
+import invariant from "tiny-invariant";
 
-const sessionCookie = createCookie("__session", {
-  secrets: ["XXX--replace me"],
-  maxAge: 3600,
-  sameSite: true,
+invariant(process.env.SESSION_SECRET, "SESSION_SECRET must be set");
+
+const sessionStorage = createArcTableSessionStorage({
+  table: "session",
+  ttl: "_ttl",
+  idx: "_idx",
+  cookie: {
+    name: "__session",
+    httpOnly: true,
+    maxAge: 60 * 60 * 24 * 7, // 7 days
+    path: "/",
+    sameSite: "lax",
+    secrets: [process.env.SESSION_SECRET],
+    secure: process.env.NODE_ENV === "production",
+  },
 });
 
-const { getSession, commitSession, destroySession } =
-  createArcTableSessionStorage({
-    table: "session",
-    idx: "_idx",
-    ttl: "_ttl",
-    cookie: sessionCookie,
-  });
+const USER_SESSION_KEY = "user";
 
-export { getSession, commitSession, destroySession };
+async function getSession(input: string | Request | null): Promise<Session> {
+  const cookieHeader =
+    input instanceof Request ? input.headers.get("Cookie") : input;
+
+  return sessionStorage.getSession(cookieHeader);
+}
+
+async function getUserId(request: Request) {
+  const session = await getSession(request);
+  const userId = session.get(USER_SESSION_KEY);
+  if (!userId || typeof userId !== "string") return null;
+  return userId;
+}
+
+async function requireUserId(
+  request: Request,
+  redirectTo: string = new URL(request.url).pathname
+) {
+  const session = await getSession(request);
+  const userId = session.get("userId");
+  if (!userId || typeof userId !== "string") {
+    const searchParams = new URLSearchParams([["redirectTo", redirectTo]]);
+    throw redirect(`/login?${searchParams}`);
+  }
+  return userId;
+}
+
+async function createUserSession(
+  request: Request,
+  userId: string,
+  redirectTo: string
+) {
+  const session = await getSession(request);
+  session.set(USER_SESSION_KEY, userId);
+  return redirect(redirectTo, {
+    headers: {
+      "Set-Cookie": await sessionStorage.commitSession(session),
+    },
+  });
+}
+
+async function logout(request: Request) {
+  const session = await getSession(request);
+  return redirect("/login", {
+    headers: {
+      "Set-Cookie": await sessionStorage.destroySession(session),
+    },
+  });
+}
+
+export {
+  sessionStorage,
+  getSession,
+  getUserId,
+  requireUserId,
+  createUserSession,
+  logout,
+};

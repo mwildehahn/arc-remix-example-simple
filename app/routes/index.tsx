@@ -1,6 +1,6 @@
 import { useLoaderData, json } from "remix";
 import type { LoaderFunction, MetaFunction } from "remix";
-import { getSession, commitSession } from "../sessions.server";
+import { getUserId } from "~/sessions.server";
 
 type Data = {
   resources: {
@@ -10,8 +10,8 @@ type Data = {
 };
 
 export const loader: LoaderFunction = async ({ request }) => {
-  const session = await getSession(request.headers.get("Cookie"));
-  console.log("Session ID:", session.id);
+  const userId = await getUserId(request);
+  console.log({ userId });
 
   const data = {
     resources: [
@@ -30,11 +30,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     ],
   };
 
-  return json(data, {
-    headers: {
-      "Set-Cookie": await commitSession(session),
-    },
-  });
+  return json(data);
 };
 
 export const meta: MetaFunction = () => {
